@@ -1,0 +1,297 @@
+---
+title: "Regression Analysis of Systolic Blood Pressure in ICU Patients"
+format: html
+embed-resources: true
+editor: visual
+---
+
+```{r}
+#| include: false
+
+library(tidyverse)    
+library(ggplot2)     
+library(performance)  
+library(skimr)       
+library(sjPlot)      
+library(plotly) 
+library(broom)  
+library(gridExtra)
+library(dplyr)
+library(kableExtra)
+library(Stat2Data)
+data("ICU")
+```
+
+# Introduction {#sec-Intro}
+
+The aim of this analysis is to investigate whether systolic blood pressure in patients is associated with their age and infection status. Understanding this relationship is important as it can help doctors make informed treatment decisions for patients and better understand what factors affect systolic blood pressure.
+
+In this study, systolic blood pressure (SysBP), measured in mm of Hg, is treated as the response variable. Age, measured in years, and infection status (1=infection suspected, 0= no infection) are treated as the explanatory variables.
+
+@sec-eda consists of exploratory analysis of the dataset and explores the potential relationships between SysBP, Infection and Age. @sec-fa contains the results from fitting a multiple regression model to the data, as well as the assessment of the model assumptions. Concluding remarks are given in @sec-conc.
+
+# Exploratory Data Analysis {#sec-eda}
+
+We begin by subsetting the ICU data set such that we only have the variables that we are interested in: `SysBP`, `Age` and `Infection`.
+
+```{r}
+ICU.score <- ICU %>% 
+  select(SysBP, Age, Infection) %>%
+  mutate(Infection = factor(Infection, levels = c(0, 1),
+                            labels = c("No suspected infection", "Suspected infection")))
+```
+
+We use the `skim()` function to obtain a brief collection of summary statistics.
+
+```{r}
+ICU.score %>% skim()
+```
+
+Now, we compute the correlation between the outcome variable `SysBP` and the numerical explanatory variable `Age` by `Infection`.
+
+```{r}
+ICU.score %>% summarise(rho = cor(SysBP, Age),
+.by = Infection)
+```
+
+These correlations suggest there is essentially no linear association between `Age` and `SysBP` for patients with suspected infection. Additionally, there was only a very weak positive association between `SysBP` and `Age` for patients with no suspected infection.
+
+We now visualise our data by producing a scatterplot. Seeing as we have the categorical variable `Infection`, we shall plot the points using different colours for each infection status:
+
+```{r}
+#| label: fig-scatterplot1
+#| fig-cap: Relationship between Systolic Blood Pressure and Age by Infection.
+#| fig-width: 4
+#| fig-height: 3
+#| fig-align: center
+#| message: false
+
+ggplot(ICU.score,
+aes(x = Age, y = SysBP, color = Infection)) +
+geom_jitter() +
+labs(x = "Age (years) ", y = "Systolic Blood Pressure (mm of Hg)", color = "Infection status")
+
+```
+
+The scatterplot initially suggests a very weak association between `Age` and `SysBP`, with large variability present in the data. The two infection groups are not clearly separated, suggesting that `Infection` does not have a strong association with blood pressure.
+
+```{r}
+#| label: fig-boxplot1
+#| fig-cap: Distribution of systolic blood pressure by infection status.
+#| fig-align: center
+#| message: false
+
+ggplot(ICU.score, aes(x = Infection, y = SysBP, fill = Infection)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(x = "Infection status", 
+       y = "Systolic Blood Pressure (mm Hg)")
+```
+
+@fig-boxplot1 shows the distribution of systolic blood pressure for patients with and without suspected infection. The median systolic blood pressure is on average slightly lower for patients with suspected infection. Additionally, there is also less variation seen for this group. However, there is considerable overlap between the two groups, suggesting that infection status alone cannot accurately predict systolic blood pressure.
+
+# Formal Analysis {#sec-fa}
+
+## Parallel Slopes Model
+
+This model implies that the slope of relationship between systolic blood pressure (`SysBP`) and age (`Age`) is the same for patients with either infection status, with only the intercept of the regression lines changing. Hence, our parallel regression lines model is given as:
+
+$$
+y_i = \alpha + \beta_1 x_{1i} + \beta_2 x_{2i} + \varepsilon_i
+= \alpha + \beta_{Age} \cdot Age + \beta_{Infection} \cdot \mathbb{I}_{Infection}(x) + \varepsilon_i
+$$
+
+where
+
+-   $\alpha$ is the intercept of the regression line for patients with no suspected infection;
+
+-   $\beta_{Age}$ is the slope of the regression line for all patients;
+
+-   $\beta_{Infection}$ is the additional term added to $\alpha$ to get the intercept of the regression line for patients with suspected infection;
+
+$$
+\mathbb{I}_{Infection}(x) = \begin{cases} 1 & \text{suspected infection,} \\ 0 & \text{otherwise} \end{cases}.
+$$
+
+We can fit the parallel regression lines model as follows:
+
+```{r}
+par.model <- lm(SysBP ~ Age + Infection, data = ICU.score)
+tab_model(par.model,show.ci = F)
+```
+
+Hence, the regression line for patients with no suspected infection is given by:
+
+$$
+\widehat{SysBP} = 131.49 + 0.13 \cdot Age
+$$
+
+while the regression line for patients with suspected infection is given by:
+
+$$
+\widehat{SysBP} = 131.49 + 0.13 \cdot Age - 16.03 = 115.46 + 0.13 \cdot Age .
+$$
+
+Now, let us superimpose our parallel regression lines onto the scatterplot of `SysBP` against `Age`.
+
+```{r}
+#| label: fig-scatterplot2
+#| fig-cap: Parallel regression model fitted lines superimposed onto Scatterplot 1
+#| fig-width: 4
+#| fig-height: 3
+#| fig-align: center
+#| message: false
+
+plot_model(model = par.model,  
+           type="pred",            
+           terms = c("Age","Infection"), 
+           grid=T,                   
+           show.data = T,            
+           jitter=T,                 
+           ci.lvl = NA,               
+           title="Parallel Regression Model fitted lines")
+```
+
+According to the parallel regression lines model, both Infection status' have the same slope. That is, the associated effect of `Age` on `SysBP` is the same for patients both with and without suspected infection. Hence, for every one year increase in `Age`, is associated with an increase in `SysBP` of 0.13 mm of Hg. However, patients with suspected infection have an average blood pressure 16.03 mm of Hg lower than patients without suspected infection, for the same age. This represents the average difference in systolic blood pressure between patients with and without suspected infection.
+
+Now we have to assess the fit of the model by looking at plots of the residuals.
+
+```{r}
+par.model_output <-  ICU.score %>% 
+  mutate(score_hat  = par.model$fitted.values,
+         residual = par.model$residuals)
+```
+
+```{r}
+#| label: fig-scatterplot3
+#| fig-cap: Scatterplot of the residuals against the explanatory variable by Infection
+#| fig-width: 4
+#| fig-height: 3
+#| fig-align: center
+#| message: false
+ggplot(par.model_output, aes(x = Age, y = residual)) +
+  geom_point() +
+  labs(x = "Age", y = "Residual") +
+  geom_hline(yintercept = 0, col = "blue", linewidth = 1) +
+  facet_wrap(~ Infection)
+```
+
+```{r}
+#| label: fig-residuals1
+#| fig-cap: Parallel slopes model residuals
+#| message: false
+check_model(par.model,check = c("linearity","homogeneity", "qq", "normality"))
+```
+
+@fig-residuals1 displays the model diagnostic plots. The assumptions of the residuals having mean zero and constant variance across the fitted values appears to be reasonable. This is observed from the roughly even scatter of points above and below the zero line indicating that the residuals have mean zero (top left panel). The scattering of the points is also constant across all fitted values with no strong pattern observed in the residuals (top right panel). Lastly, the bottom row displays QQ-plot and histogram of the residuals. Here we can see that the residuals appear to be bell-shaped and centred at zero, and that the sample vs theoretical quantiles fall along the line. Hence, the assumption of having normally distributed residuals with mean zero appears to be valid. Overall, the diagnostic plots do not indicate any serious violations of the model assumptions.
+
+## Interaction Model
+
+There is an interaction effect if the associated effect of one variable depends on the value of another variable. For example, the effect of `Age` here will depend on the infection status on the patient, that is, the effect of `Age` on `SysBP` will differ by infection status. The interaction model can be written as:
+
+$$
+SysBP_i = \alpha + \beta_{\text{Age}} \cdot Age
++ \beta_{\text{Infection}} \cdot \mathbb{I}_{\text{Infection}}(x)
++ \beta_{\text{Age,Infection}} \cdot Age \cdot \mathbb{I}_{\text{Infection}}(x)
++ \epsilon_i
+$$
+
+where $\beta_{\text{Age,Infection}} \cdot Age \cdot\mathbb{I}_{\text{Infection}}(x)$ corresponds to an interaction term, allowing the association between age and systolic blood pressure to differ by infection status.
+
+In order to fit an interaction term within our regression model we replace `+` with `*` as follows:
+
+```{r}
+int.model <-lm(SysBP ~ Age * Infection, data = ICU.score)
+tab_model(int.model,show.ci = F)
+```
+
+Hence, the regression line for patients with no infection is given by:
+
+$$
+\widehat{SysBP} = 125.53 + 0.24 \cdot Age,
+$$
+
+whereas the regression line for patients with suspected infection is given by:
+
+$$
+\widehat{SysBP} = 125.53 + 0.24 \cdot Age + 2.96 - 0.32 \cdot Age 
+= 128.49 -0.08 \cdot Age
+$$
+
+We can now plot the fitted model:
+
+```{r}
+#| label: Scatterplot4
+#| fig-cap: Systolic Blood Pressure by Age and infection status with regression lines varying by infection status superimposed.
+#| fig-width: 4
+#| fig-height: 3
+#| fig-align: center
+#| message: false
+plot_model(model = int.model, 
+           type=  "pred",       
+           terms = c("Age","Infection"), 
+           grid=F,                
+           show.data = T,         
+           jitter=T,              
+           ci.lvl = NA,           
+           title ="Infection-Age interaction model fitted lines",
+           colors = c("purple", "orange")) 
+```
+
+Once again, we have to assess the fit of the model by looking at plots of the residuals.
+
+```{r}
+int.model_output <-  ICU.score %>% 
+  mutate(score_hat  = int.model$fitted.values,
+         residual = int.model$residuals)
+```
+
+```{r}
+#| label: Scatterplot5
+#| fig-cap: Scatterplot of the residuals against the explanatory variable by Infection
+#| fig-width: 4
+#| fig-height: 3
+#| fig-align: center
+#| message: false
+
+ggplot(int.model_output, aes(x = Age, y = residual)) +
+  geom_point() +
+  labs(x = "Age", y = "Residual") +
+  geom_hline(yintercept = 0, col = "blue", linewidth = 1) +
+  facet_wrap(~ Infection)
+```
+
+```{r}
+#| label: fig-residuals2
+#| fig-cap: Interaction model residuals
+#| fig-align: center
+#| message: false
+check_model(int.model,check = c("linearity","homogeneity", "qq", "normality"))
+```
+
+@fig-residuals2 displays the diagnostic plots for the interaction model. Similar to the diagnostic plots generated for the parallel slopes model, we can see that the model assumptions appear satisfied for the interaction model. In the top-left graph, the residuals seem to be reasonably scattered around the horizontal line. In the top-right graph, there is no obvious pattern in the spread of the residuals. The Q-Q plot shows most points do lie along the line, and the histogram of the residuals appears to be roughly bell-shaped. Overall, the plots do not indicate there is any serious violation of the model assumptions.
+
+## Model Comparison
+
+```{r}
+tab_model(int.model, par.model,
+          show.aic = T,
+          collapse.ci = T)
+```
+
+The parallel slopes model fits the data better, as it has the lowest AIC value. However, the difference in AIC values is relatively very small, and so great care should be taken when selecting the final model. In an ideal world, predictors would be selected based on past research and extensive model testing.
+
+We notice that the interaction model has a slightly higher adjusted $R^2$ (0.052 compared to 0.049). The variability explained by the interaction model is less than 1% more than the parallel slopes model, and so the improvement in explained variability in the data is minimal. These values suggest both models explain extremely little variability in the data.
+
+We can also look at an ANOVA table to assess whether an interaction term significantly improves the model.
+
+```{r}
+anova(par.model, int.model)
+```
+
+As we can see, the p-value = 0.1865 \> 0.05, so there is not statistically sufficient evidence that the interaction term improves the model, and so should not be included. Hence, the parallel slopes model seems to be the better fit to the data.
+
+# Conclusion {#sec-conc}
+
+The regression analysis indicates that patients' age is very weakly positively associated with systolic blood pressure, suggesting that older patients tend to have slightly higher systolic blood pressure on average. Infection status appears to be associated with systolic blood pressure, with patients who have suspected infection having lower average systolic blood pressure after accounting for age. The parallel slopes model was selected as the final model as there was no statistically significant evidence to suggest the interaction term improved the model fit.
+
+The differences in AIC are relatively very small, indicating that other factors may also play an important role in determining systolic blood pressure. Although the interaction model has a slightly higher adjusted $R^2$, the parallel slopes model was chosen as it has a lower AIC and the interaction term was found to not be statistically significant. Overall, this model still explains only a very small amount of the variation in the data, and further testing into other variables which may affect systolic blood pressure should be conducted.
